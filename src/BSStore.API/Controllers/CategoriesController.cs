@@ -64,6 +64,7 @@ public class CategoriesController : ControllerBase
                 p.StoreId,
                 p.Store.Name,
                 p.SourceType,
+                p.ExpectedPurchasePrice,
                 p.SellingPrice,
                 p.Inventory != null ? p.Inventory.Quantity : null,
                 p.IsActive,

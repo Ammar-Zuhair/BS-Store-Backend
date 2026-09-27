@@ -86,6 +86,8 @@ public class DriverController : ControllerBase
                         o.Status != OrderStatus.Cancelled &&
                         o.Status != OrderStatus.Returned)
             .OrderByDescending(o => o.CreatedAt)
+            .Include(o => o.Customer)
+                .ThenInclude(c => c.User)
             .Include(o => o.Address)
             .Include(o => o.SubOrders)
             .ThenInclude(so => so.Store)
@@ -110,6 +112,8 @@ public class DriverController : ControllerBase
         var orders = await _db.Orders
             .Where(o => o.DriverId == driver.Id && o.Status == OrderStatus.Delivered)
             .OrderByDescending(o => o.UpdatedAt)
+            .Include(o => o.Customer)
+                .ThenInclude(c => c.User)
             .Include(o => o.Address)
             .Include(o => o.SubOrders)
             .ThenInclude(so => so.Store)
@@ -365,7 +369,9 @@ public class DriverController : ControllerBase
                     i.TotalSellingPrice,
                     i.ActualPurchasePrice
                 )).ToList()
-            )).ToList()
+            )).ToList(),
+            o.Customer?.FullName ?? "عميل المنصة",
+            o.Customer?.User?.Phone ?? ""
         );
     }
 }

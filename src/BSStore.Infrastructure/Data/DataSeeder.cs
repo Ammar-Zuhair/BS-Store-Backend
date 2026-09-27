@@ -25,7 +25,7 @@ public static class DataSeeder
             });
             await context.SaveChangesAsync();
         }
-        else
+        else if (existingDelivery.BaseFee != 400 || existingDelivery.PerKmFee != 50 || existingDelivery.BaseDistanceKm != 1.0m)
         {
             existingDelivery.BaseFee = 400;
             existingDelivery.PerKmFee = 50;
@@ -70,7 +70,7 @@ public static class DataSeeder
             var adminUser = new User
             {
                 Phone = adminPhone,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("AdminPassword123!", 12),
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("AdminPassword123!", 10),
                 Role = UserRole.SuperAdmin,
                 IsActive = true
             };
@@ -86,7 +86,7 @@ public static class DataSeeder
             var driverUser = new User
             {
                 Phone = driverPhone,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("DriverPassword123!", 12),
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("DriverPassword123!", 10),
                 Role = UserRole.Driver,
                 IsActive = true
             };

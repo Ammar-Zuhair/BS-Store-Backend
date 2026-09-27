@@ -143,6 +143,7 @@ public class CheckoutController : ControllerBase
     {
         var userId = GetUserId();
         var customer = await _db.Customers
+            .Include(c => c.User)
             .Include(c => c.Addresses)
             .Include(c => c.Cart)
             .ThenInclude(cart => cart!.Items)
@@ -161,6 +162,8 @@ public class CheckoutController : ControllerBase
         if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
         {
             var existingOrder = await _db.Orders
+                .Include(o => o.Customer)
+                    .ThenInclude(c => c.User)
                 .Include(o => o.SubOrders)
                 .ThenInclude(so => so.Items)
                 .Include(o => o.SubOrders)
@@ -174,7 +177,34 @@ public class CheckoutController : ControllerBase
             }
         }
 
-        var cartItems = customer.Cart?.Items.ToList() ?? [];
+        List<CartItem> cartItems = [];
+        if (request.Items != null && request.Items.Count > 0)
+        {
+            var productIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
+            var products = await _db.Products
+                .Where(p => productIds.Contains(p.Id))
+                .Include(p => p.Store)
+                .Include(p => p.Inventory)
+                .ToDictionaryAsync(p => p.Id, ct);
+
+            foreach (var input in request.Items)
+            {
+                if (products.TryGetValue(input.ProductId, out var product))
+                {
+                    cartItems.Add(new CartItem
+                    {
+                        ProductId = product.Id,
+                        Product = product,
+                        Quantity = input.Quantity
+                    });
+                }
+            }
+        }
+        else
+        {
+            cartItems = customer.Cart?.Items.ToList() ?? [];
+        }
+
         if (cartItems.Count == 0)
             return BadRequest(ApiResponse.Fail("سلة التسوق فارغة"));
 
@@ -360,15 +390,19 @@ public class CheckoutController : ControllerBase
             Reason = "إنشاء الطلب"
         });
 
-        // Clear Cart items
-        _db.CartItems.RemoveRange(customer.Cart!.Items);
+        // Clear Cart items if any
+        if (customer.Cart?.Items != null && customer.Cart.Items.Count > 0)
+        {
+            _db.CartItems.RemoveRange(customer.Cart.Items);
+        }
 
         _db.Orders.Add(order);
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
-        // Load store names for clean DTO
+        // Load store names and customer user for clean DTO
         await _db.Entry(order).Collection(o => o.SubOrders).Query().Include(so => so.Store).LoadAsync(ct);
+        await _db.Entry(order).Reference(o => o.Customer).Query().Include(c => c.User).LoadAsync(ct);
 
         return Ok(ApiResponse<OrderDto>.Ok(MapToDto(order), "تم إنشاء طلبك بنجاح!"));
     }
@@ -409,7 +443,9 @@ public class CheckoutController : ControllerBase
                     i.TotalSellingPrice,
                     i.ActualPurchasePrice
                 )).ToList()
-            )).ToList()
+            )).ToList(),
+            o.Customer?.FullName ?? "عميل المنصة",
+            o.Customer?.User?.Phone ?? ""
         );
     }
 

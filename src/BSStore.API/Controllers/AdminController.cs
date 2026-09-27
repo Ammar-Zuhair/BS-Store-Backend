@@ -67,12 +67,14 @@ public class AdminController : ControllerBase
 
         var orders = await query
             .OrderByDescending(o => o.CreatedAt)
+            .Include(o => o.Customer)
+                .ThenInclude(c => c.User)
             .Include(o => o.Driver)
             .Include(o => o.Address)
             .Include(o => o.SubOrders)
-            .ThenInclude(so => so.Store)
+                .ThenInclude(so => so.Store)
             .Include(o => o.SubOrders)
-            .ThenInclude(so => so.Items)
+                .ThenInclude(so => so.Items)
             .ToListAsync(ct);
 
         var dtos = orders.Select(MapToDto).ToList();
@@ -794,7 +796,7 @@ public class AdminController : ControllerBase
 
     /// <summary>Create store.</summary>
     [HttpPost("stores")]
-    public async Task<IActionResult> CreateStore([FromBody] Store request, CancellationToken ct)
+    public async Task<IActionResult> CreateStore([FromBody] BSStore.Application.Catalog.DTOs.CreateStoreRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Phone))
             return BadRequest(ApiResponse.Fail("اسم المتجر ورقم الهاتف حقول إلزامية"));
@@ -806,6 +808,7 @@ public class AdminController : ControllerBase
             Address = request.Address,
             Latitude = request.Latitude,
             Longitude = request.Longitude,
+            ImageKey = request.ImageUrl ?? request.ImageKey,
             IsActive = true
         };
 
@@ -817,7 +820,7 @@ public class AdminController : ControllerBase
 
     /// <summary>Update store.</summary>
     [HttpPut("stores/{id:guid}")]
-    public async Task<IActionResult> UpdateStore(Guid id, [FromBody] Store request, CancellationToken ct)
+    public async Task<IActionResult> UpdateStore(Guid id, [FromBody] BSStore.Application.Catalog.DTOs.UpdateStoreRequest request, CancellationToken ct)
     {
         var store = await _db.Stores.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (store == null) return NotFound(ApiResponse.Fail("المتجر غير موجود"));
@@ -827,6 +830,10 @@ public class AdminController : ControllerBase
         store.Address = request.Address;
         store.Latitude = request.Latitude;
         store.Longitude = request.Longitude;
+        if (!string.IsNullOrEmpty(request.ImageUrl ?? request.ImageKey))
+        {
+            store.ImageKey = request.ImageUrl ?? request.ImageKey;
+        }
         store.IsActive = request.IsActive;
 
         await _db.SaveChangesAsync(ct);
@@ -896,7 +903,9 @@ public class AdminController : ControllerBase
                     i.TotalSellingPrice,
                     i.ActualPurchasePrice
                 )).ToList()
-            )).ToList()
+            )).ToList(),
+            o.Customer?.FullName ?? "عميل المنصة",
+            o.Customer?.User?.Phone ?? ""
         );
     }
 

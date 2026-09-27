@@ -37,7 +37,7 @@ public class AuthService : IAuthService
             throw new BusinessRuleException("بيانات عنوان التوصيل وموقعه الجغرافي الصحيح إلزامية لإنشاء الحساب.", "INITIAL_ADDRESS_REQUIRED");
         }
 
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password, workFactor: 12);
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password, workFactor: 10);
 
         var user = new User
         {
@@ -81,6 +81,7 @@ public class AuthService : IAuthService
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
         var user = await _db.Users
+            .AsNoTracking()
             .Include(u => u.Customer)
             .Include(u => u.Driver)
             .FirstOrDefaultAsync(u => u.Phone == request.Phone, ct);

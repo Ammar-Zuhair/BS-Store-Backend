@@ -32,6 +32,7 @@ public record ProductDto(
     Guid StoreId,
     string StoreName,
     SourceType SourceType,
+    decimal ExpectedPurchasePrice,
     decimal SellingPrice,
     int? AvailableStock,
     bool IsActive,
@@ -60,4 +61,25 @@ public record UpdateProductRequest(
     decimal SellingPrice,
     bool IsActive,
     List<string>? Images = null
+);
+
+public record CreateStoreRequest(
+    string Name,
+    string Phone,
+    string Address,
+    decimal Latitude,
+    decimal Longitude,
+    string? ImageUrl = null,
+    string? ImageKey = null
+);
+
+public record UpdateStoreRequest(
+    string Name,
+    string Phone,
+    string Address,
+    decimal Latitude,
+    decimal Longitude,
+    string? ImageUrl = null,
+    string? ImageKey = null,
+    bool IsActive = true
 );

@@ -30,7 +30,8 @@ public record PlaceOrderRequest(
     NewAddressInput? NewAddress,
     PaymentMethod PaymentMethod,
     string? Notes,
-    string? IdempotencyKey
+    string? IdempotencyKey,
+    List<CheckoutItemInput>? Items = null
 );
 
 public record NewAddressInput(
@@ -52,7 +53,11 @@ public record OrderItemDto(
     int Quantity,
     decimal TotalPrice,
     decimal? ActualPurchasePrice
-);
+)
+{
+    public string ProductNameSnapshot => ProductName;
+    public decimal SellingPriceSnapshot => UnitPrice;
+}
 
 public record SubOrderDto(
     Guid Id,
@@ -78,7 +83,9 @@ public record OrderDto(
     string? DriverName,
     string? DriverPhone,
     string DeliveryAddress,
-    List<SubOrderDto> SubOrders
+    List<SubOrderDto> SubOrders,
+    string? CustomerName = null,
+    string? CustomerPhone = null
 );
 
 public record CancelOrderRequest(

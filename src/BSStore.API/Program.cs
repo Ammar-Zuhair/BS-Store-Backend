@@ -45,42 +45,82 @@ try
     });
 
     // ─── Database Connection String Resolution ─────────────────────────────────
-    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-    if (string.IsNullOrWhiteSpace(connectionString))
+    var rawConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    string connectionString;
+
+    if (string.IsNullOrWhiteSpace(rawConnectionString))
     {
         var host = builder.Configuration["DB_HOST"] ?? "localhost";
         var dbPort = builder.Configuration["DB_PORT"] ?? "5432";
         var db = builder.Configuration["DB_NAME"] ?? "BS_Store";
         var user = builder.Configuration["DB_USER"] ?? "postgres";
         var pass = builder.Configuration["DB_PASSWORD"] ?? "";
-        connectionString = $"Host={host};Port={dbPort};Database={db};Username={user};Password={pass}";
+        connectionString = $"Host={host};Port={dbPort};Database={db};Username={user};Password={pass};";
     }
-    else if (connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) || 
-             connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    else if (rawConnectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) || 
+             rawConnectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
     {
         // Parse standard URI format provided by Supabase / Cloud Postgres
         try
         {
-            var uri = new Uri(connectionString);
+            var uri = new Uri(rawConnectionString);
             var userInfo = uri.UserInfo.Split(':');
             var user = Uri.UnescapeDataString(userInfo[0]);
             var pass = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
             var host = uri.Host;
             var uriPort = uri.Port > 0 ? uri.Port : 5432;
             var db = uri.AbsolutePath.TrimStart('/');
-            connectionString = $"Host={host};Port={uriPort};Database={db};Username={user};Password={pass};SSL Mode=Require;Trust Server Certificate=true";
+            connectionString = $"Host={host};Port={uriPort};Database={db};Username={user};Password={pass};SSL Mode=Require;Trust Server Certificate=true;";
         }
         catch (Exception ex)
         {
             Log.Warning(ex, "Failed to parse database URI. Using raw connection string.");
+            connectionString = rawConnectionString;
         }
+    }
+    else
+    {
+        connectionString = rawConnectionString;
+    }
+
+    // ─── Optimize Connection Pooling for Cloud Database (Supabase / Render) ────
+    try
+    {
+        var npgsqlBuilder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Pooling = true,
+            MinPoolSize = 1,                 // Keep 1 warm connection ready to eliminate SSL/TCP handshake latency
+            MaxPoolSize = 25,                // Avoid exhausting connection limits on Supabase free-tier
+            ConnectionIdleLifetime = 300,   // Keep active in pool up to 5 minutes
+            KeepAlive = 30,                 // Send TCP keepalive probe every 30s to prevent cloud proxy/firewall drops
+            Timeout = 15,                   // Fail-fast timeout for initial connection attempt
+            CommandTimeout = 30
+        };
+
+        if (npgsqlBuilder.Host != "localhost" && npgsqlBuilder.Host != "127.0.0.1")
+        {
+            npgsqlBuilder.SslMode = Npgsql.SslMode.Require;
+        }
+
+        connectionString = npgsqlBuilder.ConnectionString;
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Failed to apply connection pooling optimizations. Using default connection string.");
     }
 
     builder.Services.AddDbContext<AppDbContext>(options =>
     {
         options.UseNpgsql(
             connectionString,
-            npgsqlOptions => npgsqlOptions.MigrationsAssembly("BSStore.Infrastructure")
+            npgsqlOptions =>
+            {
+                npgsqlOptions.MigrationsAssembly("BSStore.Infrastructure");
+                npgsqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 3,
+                    maxRetryDelay: TimeSpan.FromSeconds(3),
+                    errorCodesToAdd: null);
+            }
         );
 
         if (builder.Environment.IsDevelopment())
@@ -229,6 +269,15 @@ try
     app.UseRateLimiter();
     app.UseAuthentication();
     app.UseAuthorization();
+
+    // ─── Fast Health Check Endpoint (Keep-Alive for Render / Monitoring) ────────
+    app.MapGet("/health", () => Results.Ok(new
+    {
+        status = "healthy",
+        service = "BS Store API",
+        timestamp = DateTime.UtcNow
+    }));
+
     app.MapControllers();
 
     // ─── Auto-migrate and Seed on startup ──────────────────────────────────────

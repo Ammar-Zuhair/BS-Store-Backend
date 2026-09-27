@@ -38,6 +38,8 @@ public class OrdersController : ControllerBase
         var orders = await _db.Orders
             .Where(o => o.CustomerId == customer.Id)
             .OrderByDescending(o => o.CreatedAt)
+            .Include(o => o.Customer)
+                .ThenInclude(c => c.User)
             .Include(o => o.Driver)
             .Include(o => o.Address)
             .Include(o => o.SubOrders)
@@ -61,6 +63,8 @@ public class OrdersController : ControllerBase
 
         var order = await _db.Orders
             .Where(o => o.Id == id)
+            .Include(o => o.Customer)
+                .ThenInclude(c => c.User)
             .Include(o => o.Driver)
             .Include(o => o.Address)
             .Include(o => o.SubOrders)
@@ -198,7 +202,9 @@ public class OrdersController : ControllerBase
                     i.TotalSellingPrice,
                     i.ActualPurchasePrice
                 )).ToList()
-            )).ToList()
+            )).ToList(),
+            o.Customer?.FullName ?? "عميل المنصة",
+            o.Customer?.User?.Phone ?? ""
         );
     }
 }
