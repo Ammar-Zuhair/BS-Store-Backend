@@ -28,12 +28,9 @@ try
     // Ensure environment variables are loaded into configuration
     builder.Configuration.AddEnvironmentVariables();
 
-    // Ensure Kestrel binds to 0.0.0.0 so mobile devices and Expo can connect via LAN IP
-    var configuredUrls = builder.Configuration["ASPNETCORE_URLS"] ?? builder.Configuration["urls"];
-    if (string.IsNullOrWhiteSpace(configuredUrls))
-    {
-        builder.WebHost.UseUrls("http://0.0.0.0:5295");
-    }
+    // Ensure Kestrel binds to 0.0.0.0 and honors PORT on hosting platforms (like Render/Railway)
+    var port = Environment.GetEnvironmentVariable("PORT") ?? "5295";
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
     // ─── Serilog ───────────────────────────────────────────────────────────────
     builder.Host.UseSerilog((ctx, services, cfg) =>
