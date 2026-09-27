@@ -29,8 +29,8 @@ try
     builder.Configuration.AddEnvironmentVariables();
 
     // Ensure Kestrel binds to 0.0.0.0 and honors PORT on hosting platforms (like Render/Railway)
-    var port = Environment.GetEnvironmentVariable("PORT") ?? "5295";
-    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+    var appPort = Environment.GetEnvironmentVariable("PORT") ?? "5295";
+    builder.WebHost.UseUrls($"http://0.0.0.0:{appPort}");
 
     // ─── Serilog ───────────────────────────────────────────────────────────────
     builder.Host.UseSerilog((ctx, services, cfg) =>
@@ -49,11 +49,31 @@ try
     if (string.IsNullOrWhiteSpace(connectionString))
     {
         var host = builder.Configuration["DB_HOST"] ?? "localhost";
-        var port = builder.Configuration["DB_PORT"] ?? "5432";
+        var dbPort = builder.Configuration["DB_PORT"] ?? "5432";
         var db = builder.Configuration["DB_NAME"] ?? "BS_Store";
         var user = builder.Configuration["DB_USER"] ?? "postgres";
         var pass = builder.Configuration["DB_PASSWORD"] ?? "";
-        connectionString = $"Host={host};Port={port};Database={db};Username={user};Password={pass}";
+        connectionString = $"Host={host};Port={dbPort};Database={db};Username={user};Password={pass}";
+    }
+    else if (connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) || 
+             connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        // Parse standard URI format provided by Supabase / Cloud Postgres
+        try
+        {
+            var uri = new Uri(connectionString);
+            var userInfo = uri.UserInfo.Split(':');
+            var user = Uri.UnescapeDataString(userInfo[0]);
+            var pass = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
+            var host = uri.Host;
+            var uriPort = uri.Port > 0 ? uri.Port : 5432;
+            var db = uri.AbsolutePath.TrimStart('/');
+            connectionString = $"Host={host};Port={uriPort};Database={db};Username={user};Password={pass};SSL Mode=Require;Trust Server Certificate=true";
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to parse database URI. Using raw connection string.");
+        }
     }
 
     builder.Services.AddDbContext<AppDbContext>(options =>
