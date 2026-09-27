@@ -784,7 +784,8 @@ public class AdminController : ControllerBase
                 s.Latitude,
                 s.Longitude,
                 s.ImageKey,
-                s.IsActive
+                s.IsActive,
+                s.Products.Where(p => p.IsActive && !p.IsDeleted).Select(p => p.CategoryId).Distinct().ToList()
             ))
             .ToListAsync(ct);
 
@@ -988,4 +989,3 @@ public record FlagUserRequest(
 );
 
 public record BanRequest(bool IsBanned);
-

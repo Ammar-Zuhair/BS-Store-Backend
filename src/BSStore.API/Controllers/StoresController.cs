@@ -39,7 +39,8 @@ public class StoresController : ControllerBase
                 s.Latitude,
                 s.Longitude,
                 s.ImageKey,
-                s.IsActive
+                s.IsActive,
+                s.Products.Where(p => p.IsActive && !p.IsDeleted).Select(p => p.CategoryId).Distinct().ToList()
             ))
             .ToListAsync(ct);
 
@@ -62,7 +63,8 @@ public class StoresController : ControllerBase
                 s.Latitude,
                 s.Longitude,
                 s.ImageKey,
-                s.IsActive
+                s.IsActive,
+                s.Products.Where(p => p.IsActive && !p.IsDeleted).Select(p => p.CategoryId).Distinct().ToList()
             ))
             .FirstOrDefaultAsync(ct);
 

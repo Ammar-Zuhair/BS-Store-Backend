@@ -96,6 +96,10 @@ public class CustomersController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.City) || string.IsNullOrWhiteSpace(request.Street))
             return BadRequest(ApiResponse.Fail("المدينة والشارع حقول إلزامية"));
 
+        if (request.Latitude is < -90 or > 90 || request.Longitude is < -180 or > 180 ||
+            (request.Latitude == 0 && request.Longitude == 0))
+            return BadRequest(ApiResponse.Fail("إحداثيات موقع التوصيل غير صحيحة"));
+
         if (request.IsDefault)
         {
             foreach (var existing in customer.Addresses)

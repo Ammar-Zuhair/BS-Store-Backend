@@ -29,9 +29,12 @@ public class AuthService : IAuthService
 
         if (request.InitialAddress == null ||
             string.IsNullOrWhiteSpace(request.InitialAddress.City) ||
-            string.IsNullOrWhiteSpace(request.InitialAddress.Street))
+            string.IsNullOrWhiteSpace(request.InitialAddress.Street) ||
+            request.InitialAddress.Latitude is < -90 or > 90 ||
+            request.InitialAddress.Longitude is < -180 or > 180 ||
+            (request.InitialAddress.Latitude == 0 && request.InitialAddress.Longitude == 0))
         {
-            throw new BusinessRuleException("تسجيل العنوان الأولي (المدينة والشارع) إلزامي لإنشاء الحساب.", "INITIAL_ADDRESS_REQUIRED");
+            throw new BusinessRuleException("بيانات عنوان التوصيل وموقعه الجغرافي الصحيح إلزامية لإنشاء الحساب.", "INITIAL_ADDRESS_REQUIRED");
         }
 
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password, workFactor: 12);
@@ -61,8 +64,8 @@ public class AuthService : IAuthService
             Street = request.InitialAddress.Street,
             Building = request.InitialAddress.Building,
             Description = request.InitialAddress.Description,
-            Latitude = request.InitialAddress.Latitude != 0 ? request.InitialAddress.Latitude : 15.35m,
-            Longitude = request.InitialAddress.Longitude != 0 ? request.InitialAddress.Longitude : 44.20m,
+            Latitude = request.InitialAddress.Latitude,
+            Longitude = request.InitialAddress.Longitude,
             IsDefault = true
         };
         _db.Addresses.Add(initialAddress);

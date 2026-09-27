@@ -19,7 +19,8 @@ public record StoreDto(
     decimal Latitude,
     decimal Longitude,
     string? ImageUrl,
-    bool IsActive
+    bool IsActive,
+    List<Guid>? CategoryIds = null
 );
 
 public record ProductDto(
