@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BSStore.API/BSStore.API.csproj" />
+    <Project Path="src/BSStore.Application/BSStore.Application.csproj" />
+    <Project Path="src/BSStore.Domain/BSStore.Domain.csproj" />
+    <Project Path="src/BSStore.Infrastructure/BSStore.Infrastructure.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,15 @@
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\bin\Debug\net10.0\BSStore.Application.deps.json
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\bin\Debug\net10.0\BSStore.Application.dll
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\bin\Debug\net10.0\BSStore.Application.pdb
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\bin\Debug\net10.0\BSStore.Domain.dll
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\bin\Debug\net10.0\BSStore.Domain.pdb
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.csproj.AssemblyReference.cache
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.GeneratedMSBuildEditorConfig.editorconfig
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.AssemblyInfoInputs.cache
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.AssemblyInfo.cs
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.csproj.CoreCompileInputs.cache
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore..377D2FF6.Up2Date
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.dll
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\refint\BSStore.Application.dll
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\BSStore.Application.pdb
+D:\MyProjects\BS_Store\backend\src\BSStore.Application\obj\Debug\net10.0\ref\BSStore.Application.dll
