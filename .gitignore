@@ -9,3 +9,5 @@ logs/
 *.suo
 .vs/
 .vscode/
+publish/
+tunnel_url.txt

@@ -130,6 +130,13 @@ public class AuthService : IAuthService
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task<bool> CheckPhoneExistsAsync(string phone, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return false;
+        var trimmed = phone.Trim();
+        return await _db.Users.AsNoTracking().AnyAsync(u => u.Phone == trimmed, ct);
+    }
+
     // ─── Private Helpers ─────────────────────────────────────────────────────────
 
     private async Task<AuthResponse> IssueTokensAsync(User user, CancellationToken ct)

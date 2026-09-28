@@ -8,6 +8,7 @@ public interface IAuthService
     Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task<AuthResponse> RefreshTokenAsync(RefreshTokenRequest request, CancellationToken ct = default);
     Task LogoutAsync(Guid userId, CancellationToken ct = default);
+    Task<bool> CheckPhoneExistsAsync(string phone, CancellationToken ct = default);
 }
 
 public interface IJwtTokenService

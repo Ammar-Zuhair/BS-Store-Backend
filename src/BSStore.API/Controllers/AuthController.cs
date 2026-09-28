@@ -19,6 +19,15 @@ public class AuthController : ControllerBase
         _authService = authService;
     }
 
+    /// <summary>Check if a phone number already exists in the system.</summary>
+    [HttpGet("check-phone")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CheckPhone([FromQuery] string phone, CancellationToken ct)
+    {
+        var exists = await _authService.CheckPhoneExistsAsync(phone, ct);
+        return Ok(ApiResponse<bool>.Ok(exists));
+    }
+
     /// <summary>Register a new customer account.</summary>
     [HttpPost("register")]
     [ProducesResponseType(typeof(ApiResponse<AuthResponse>), StatusCodes.Status200OK)]
