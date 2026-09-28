@@ -28,18 +28,36 @@ public class DealsController : ControllerBase
         var setting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "FlashDeals", ct);
         if (setting == null || string.IsNullOrWhiteSpace(setting.Value))
         {
-            var defaultDeals = AdminController.GetDefaultDeals();
-            return Ok(defaultDeals);
+            return Ok(Array.Empty<object>());
         }
 
         try
         {
             using var doc = JsonDocument.Parse(setting.Value);
-            return Ok(doc.RootElement.Clone());
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return Ok(Array.Empty<object>());
+
+            var now = DateTimeOffset.UtcNow;
+            var visibleDeals = doc.RootElement.EnumerateArray()
+                .Where(deal =>
+                    (!deal.TryGetProperty("isActive", out var active) || active.ValueKind != JsonValueKind.False) &&
+                    (!deal.TryGetProperty("isPublic", out var isPublic) || isPublic.ValueKind != JsonValueKind.False) &&
+                    (!deal.TryGetProperty("expiresAt", out var expiry) ||
+                     expiry.ValueKind != JsonValueKind.String ||
+                     (DateTimeOffset.TryParse(expiry.GetString(), out var parsedExpiry) && parsedExpiry > now)))
+                .Select(deal => deal.Clone())
+                .ToArray();
+
+            var supportedDeals = visibleDeals.Where(deal =>
+                (deal.TryGetProperty("dealKind", out var kind) && (kind.GetString() == "BUNDLE" || kind.GetString() == "DELIVERY_DISCOUNT")) ||
+                (deal.TryGetProperty("dealType", out var type) && (type.GetString() == "BUNDLE" || type.GetString() == "DELIVERY_DISCOUNT")) ||
+                (deal.TryGetProperty("products", out var products) && products.ValueKind == JsonValueKind.Array && products.GetArrayLength() > 0))
+                .ToArray();
+            return Ok(supportedDeals);
         }
         catch
         {
-            return Ok(AdminController.GetDefaultDeals());
+            return Ok(Array.Empty<object>());
         }
     }
 }

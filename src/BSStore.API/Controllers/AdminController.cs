@@ -994,8 +994,7 @@ public class AdminController : ControllerBase
         var setting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "FlashDeals", ct);
         if (setting == null || string.IsNullOrWhiteSpace(setting.Value))
         {
-            var defaultDeals = GetDefaultDeals();
-            return Ok(ApiResponse<object>.Ok(defaultDeals));
+            return Ok(ApiResponse<object>.Ok(Array.Empty<object>()));
         }
 
         try
@@ -1005,7 +1004,7 @@ public class AdminController : ControllerBase
         }
         catch
         {
-            return Ok(ApiResponse<object>.Ok(GetDefaultDeals()));
+            return Ok(ApiResponse<object>.Ok(Array.Empty<object>()));
         }
     }
 

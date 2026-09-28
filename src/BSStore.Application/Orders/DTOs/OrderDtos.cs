@@ -9,8 +9,10 @@ public record ValidateCheckoutRequest(
 );
 
 public record CheckoutItemInput(
-    Guid ProductId,
-    int Quantity
+    Guid? ProductId,
+    int Quantity,
+    string? DealId = null,
+    string? DealProductId = null
 );
 
 public record CheckoutValidationResult(
@@ -31,7 +33,8 @@ public record PlaceOrderRequest(
     PaymentMethod PaymentMethod,
     string? Notes,
     string? IdempotencyKey,
-    List<CheckoutItemInput>? Items = null
+    List<CheckoutItemInput>? Items = null,
+    string? DeliveryDealId = null
 );
 
 public record NewAddressInput(

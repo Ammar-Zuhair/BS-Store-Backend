@@ -39,7 +39,7 @@ public class CheckoutController : ControllerBase
             return Ok(ApiResponse<CheckoutValidationResult>.Ok(new CheckoutValidationResult(false, errors, 0, 0, 0, 0, false, 0)));
         }
 
-        var productIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
+        var productIds = request.Items.Where(i => i.ProductId.HasValue).Select(i => i.ProductId!.Value).Distinct().ToList();
         var products = await _db.Products
             .Where(p => productIds.Contains(p.Id))
             .Include(p => p.Inventory)
@@ -49,7 +49,7 @@ public class CheckoutController : ControllerBase
 
         foreach (var item in request.Items)
         {
-            if (!products.TryGetValue(item.ProductId, out var product) || !product.IsActive)
+            if (!item.ProductId.HasValue || !products.TryGetValue(item.ProductId.Value, out var product) || !product.IsActive)
             {
                 errors.Add($"أحد المنتجات لم يعد متاحاً في المتجر");
                 continue;
@@ -90,8 +90,8 @@ public class CheckoutController : ControllerBase
         if (deliverySettings.IsEnabled && request.Items.Count > 0)
         {
             var storeIds = request.Items
-                .Where(i => products.ContainsKey(i.ProductId))
-                .Select(i => products[i.ProductId].StoreId)
+                .Where(i => i.ProductId.HasValue && products.ContainsKey(i.ProductId.Value))
+                .Select(i => products[i.ProductId!.Value].StoreId)
                 .Distinct()
                 .ToList();
 
@@ -178,18 +178,20 @@ public class CheckoutController : ControllerBase
         }
 
         List<CartItem> cartItems = [];
+        var catalogProductIds = new HashSet<Guid>();
         if (request.Items != null && request.Items.Count > 0)
         {
-            var productIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
+            var productIds = request.Items.Where(i => i.ProductId.HasValue).Select(i => i.ProductId!.Value).Distinct().ToList();
             var products = await _db.Products
                 .Where(p => productIds.Contains(p.Id))
                 .Include(p => p.Store)
                 .Include(p => p.Inventory)
                 .ToDictionaryAsync(p => p.Id, ct);
+            catalogProductIds.UnionWith(products.Keys);
 
             foreach (var input in request.Items)
             {
-                if (products.TryGetValue(input.ProductId, out var product))
+                if (input.ProductId.HasValue && products.TryGetValue(input.ProductId.Value, out var product))
                 {
                     cartItems.Add(new CartItem
                     {
@@ -197,6 +199,65 @@ public class CheckoutController : ControllerBase
                         Product = product,
                         Quantity = input.Quantity
                     });
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(input.DealId))
+                {
+                    var dealSetting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "FlashDeals", ct);
+                    if (dealSetting != null && !string.IsNullOrWhiteSpace(dealSetting.Value))
+                    {
+                        try
+                        {
+                            using var dealDoc = System.Text.Json.JsonDocument.Parse(dealSetting.Value);
+                            var deal = dealDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array
+                                ? dealDoc.RootElement.EnumerateArray().FirstOrDefault(d =>
+                                    d.TryGetProperty("id", out var id) && id.GetString() == input.DealId &&
+                                    d.TryGetProperty("dealKind", out var kind) && kind.GetString() == "BUNDLE" &&
+                                    (!d.TryGetProperty("isActive", out var active) || active.ValueKind != System.Text.Json.JsonValueKind.False) &&
+                                    (!d.TryGetProperty("isPublic", out var visible) || visible.ValueKind != System.Text.Json.JsonValueKind.False) &&
+                                    d.TryGetProperty("expiresAt", out var expires) && DateTimeOffset.TryParse(expires.GetString(), out var expiry) && expiry > DateTimeOffset.UtcNow)
+                                : default;
+
+                            if (deal.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                                deal.TryGetProperty("storeId", out var storeIdJson) && Guid.TryParse(storeIdJson.GetString(), out var storeId))
+                            {
+                                var store = await _db.Stores.FirstOrDefaultAsync(s => s.Id == storeId && s.IsActive, ct);
+                                if (store != null)
+                                {
+                                    string name;
+                                    string description = string.Empty;
+                                    string imageUrl = string.Empty;
+                                    decimal price;
+                                    if (string.IsNullOrWhiteSpace(input.DealProductId))
+                                    {
+                                        name = deal.TryGetProperty("title", out var title) ? title.GetString() ?? "باقة منتجات" : "باقة منتجات";
+                                        price = ReadDecimal(deal, "discountPrice", ReadDecimal(deal, "offerPrice", 0));
+                                    }
+                                    else if (deal.TryGetProperty("products", out var pieces) && pieces.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                    {
+                                        var piece = pieces.EnumerateArray().FirstOrDefault(p => p.TryGetProperty("id", out var pieceId) && pieceId.GetString() == input.DealProductId);
+                                        if (piece.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                                        name = piece.TryGetProperty("name", out var pieceName) ? pieceName.GetString() ?? "منتج الباقة" : "منتج الباقة";
+                                        description = piece.TryGetProperty("description", out var pieceDesc) ? pieceDesc.GetString() ?? string.Empty : string.Empty;
+                                        imageUrl = piece.TryGetProperty("imageUrl", out var pieceImage) ? pieceImage.GetString() ?? string.Empty : string.Empty;
+                                        price = ReadDecimal(piece, "price", 0);
+                                    }
+                                    else continue;
+
+                                    var dealProduct = new Product
+                                    {
+                                        Id = Guid.NewGuid(), Name = name, Description = description,
+                                        StoreId = store.Id, Store = store, CategoryId = Guid.Empty,
+                                        SourceType = SourceType.ExternalStore, SellingPrice = price,
+                                        ExpectedPurchasePrice = price, IsActive = true
+                                    };
+                                    cartItems.Add(new CartItem { ProductId = dealProduct.Id, Product = dealProduct, Quantity = input.Quantity });
+                                }
+                            }
+                        }
+                        catch (System.Text.Json.JsonException) { }
+                    }
                 }
             }
         }
@@ -292,7 +353,7 @@ public class CheckoutController : ControllerBase
 
                 var orderItem = new OrderItem
                 {
-                    ProductId = product.Id,
+                    ProductId = catalogProductIds.Contains(product.Id) ? product.Id : null,
                     ProductNameSnapshot = product.Name,
                     SellingPriceSnapshot = product.SellingPrice,
                     ExpectedPurchasePriceSnapshot = product.ExpectedPurchasePrice,
@@ -333,6 +394,35 @@ public class CheckoutController : ControllerBase
 
             if (deliveryFee == 0 && stores.Count > 0)
                 deliveryFee = deliverySettings.BaseFee;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.DeliveryDealId))
+        {
+            var dealsSetting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "FlashDeals", ct);
+            if (dealsSetting != null && !string.IsNullOrWhiteSpace(dealsSetting.Value))
+            {
+                try
+                {
+                    using var dealsDoc = System.Text.Json.JsonDocument.Parse(dealsSetting.Value);
+                    if (dealsDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        var deliveryDeal = dealsDoc.RootElement.EnumerateArray().FirstOrDefault(d =>
+                            d.TryGetProperty("id", out var id) && id.GetString() == request.DeliveryDealId &&
+                            d.TryGetProperty("dealKind", out var kind) && kind.GetString() == "DELIVERY_DISCOUNT" &&
+                            (!d.TryGetProperty("dealType", out var type) || type.GetString() == "DELIVERY_DISCOUNT") &&
+                            (!d.TryGetProperty("isActive", out var active) || active.ValueKind != System.Text.Json.JsonValueKind.False) &&
+                            (!d.TryGetProperty("isPublic", out var visible) || visible.ValueKind != System.Text.Json.JsonValueKind.False) &&
+                            d.TryGetProperty("expiresAt", out var expires) && DateTimeOffset.TryParse(expires.GetString(), out var expiry) && expiry > DateTimeOffset.UtcNow);
+                        if (deliveryDeal.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                            deliveryDeal.TryGetProperty("deliveryDiscountPercent", out var percentElement) &&
+                            percentElement.TryGetInt32(out var percent) && percent is >= 1 and <= 100)
+                        {
+                            deliveryFee = Math.Round(deliveryFee * (100 - percent) / 100m, 0, MidpointRounding.AwayFromZero);
+                        }
+                    }
+                }
+                catch (System.Text.Json.JsonException) { }
+            }
         }
 
         var discount = 0m;
@@ -464,6 +554,14 @@ public class CheckoutController : ControllerBase
 
         var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
         return Math.Round(EarthRadiusKm * c, 2);
+    }
+
+    private static decimal ReadDecimal(System.Text.Json.JsonElement element, string property, decimal fallback)
+    {
+        if (!element.TryGetProperty(property, out var value)) return fallback;
+        if (value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetDecimal(out var number)) return number;
+        if (value.ValueKind == System.Text.Json.JsonValueKind.String && decimal.TryParse(value.GetString(), out number)) return number;
+        return fallback;
     }
 
     private static double DegreesToRadians(double deg) => deg * (Math.PI / 180.0);
