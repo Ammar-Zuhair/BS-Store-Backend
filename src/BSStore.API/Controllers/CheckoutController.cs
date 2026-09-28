@@ -25,6 +25,25 @@ public class CheckoutController : ControllerBase
 
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue("userId")!);
 
+    [HttpPost("delivery-quote")]
+    public async Task<IActionResult> GetDeliveryQuote([FromBody] DeliveryQuoteRequest request, CancellationToken ct)
+    {
+        var customer = await _db.Customers.Include(c => c.Addresses).FirstOrDefaultAsync(c => c.UserId == GetUserId(), ct);
+        var address = customer?.Addresses.FirstOrDefault(a => request.AddressId.HasValue && a.Id == request.AddressId.Value)
+            ?? customer?.Addresses.FirstOrDefault(a => a.IsDefault)
+            ?? customer?.Addresses.FirstOrDefault();
+        if (address == null) return BadRequest(ApiResponse.Fail("يرجى تحديد عنوان التوصيل"));
+
+        var storeIds = request.StoreIds ?? [];
+        var stores = storeIds.Distinct().Count() == 0
+            ? new List<Store>()
+            : await _db.Stores.Where(s => storeIds.Contains(s.Id)).ToListAsync(ct);
+        var settings = await _db.DeliverySettings.FirstOrDefaultAsync(ct)
+            ?? new DeliverySettings { BaseFee = 400, PerKmFee = 50, BaseDistanceKm = 1.0m, IsEnabled = true };
+        var quote = CalculateGroupDeliveryFee(stores, address.Latitude, address.Longitude, settings);
+        return Ok(ApiResponse<DeliveryQuoteResult>.Ok(new DeliveryQuoteResult(quote.Fee, quote.FarthestDistanceKm)));
+    }
+
     /// <summary>Validate checkout items, prices, delivery fee and COD eligibility.</summary>
     [HttpPost("validate")]
     [ProducesResponseType(typeof(ApiResponse<CheckoutValidationResult>), StatusCodes.Status200OK)]
@@ -87,7 +106,7 @@ public class CheckoutController : ControllerBase
         decimal deliveryFee = 0;
         double totalDistanceKm = 0;
 
-        if (deliverySettings.IsEnabled && request.Items.Count > 0)
+        if (deliverySettings.IsEnabled && request.Items.Count > 0 && selectedAddress != null)
         {
             var storeIds = request.Items
                 .Where(i => i.ProductId.HasValue && products.ContainsKey(i.ProductId.Value))
@@ -97,18 +116,9 @@ public class CheckoutController : ControllerBase
 
             var stores = await _db.Stores.Where(s => storeIds.Contains(s.Id)).ToListAsync(ct);
 
-            foreach (var store in stores)
-            {
-                var distance = selectedAddress != null
-                    ? CalculateDistanceKm(store.Latitude, store.Longitude, selectedAddress.Latitude, selectedAddress.Longitude)
-                    : 1.0;
-
-                totalDistanceKm += distance;
-                deliveryFee += CalculateDeliveryFee(distance, deliverySettings);
-            }
-
-            if (deliveryFee == 0 && stores.Count > 0)
-                deliveryFee = deliverySettings.BaseFee;
+            var deliveryQuote = CalculateGroupDeliveryFee(stores, selectedAddress.Latitude, selectedAddress.Longitude, deliverySettings);
+            deliveryFee = deliveryQuote.Fee;
+            totalDistanceKm = deliveryQuote.FarthestDistanceKm;
         }
 
         var discount = 0m;
@@ -386,14 +396,7 @@ public class CheckoutController : ControllerBase
             var distinctStoreIds = subOrdersList.Select(so => so.StoreId).Distinct().ToList();
             var stores = await _db.Stores.Where(s => distinctStoreIds.Contains(s.Id)).ToListAsync(ct);
 
-            foreach (var store in stores)
-            {
-                var distance = CalculateDistanceKm(store.Latitude, store.Longitude, address.Latitude, address.Longitude);
-                deliveryFee += CalculateDeliveryFee(distance, deliverySettings);
-            }
-
-            if (deliveryFee == 0 && stores.Count > 0)
-                deliveryFee = deliverySettings.BaseFee;
+            deliveryFee = CalculateGroupDeliveryFee(stores, address.Latitude, address.Longitude, deliverySettings).Fee;
         }
 
         if (!string.IsNullOrWhiteSpace(request.DeliveryDealId))
@@ -541,9 +544,6 @@ public class CheckoutController : ControllerBase
 
     private static double CalculateDistanceKm(decimal lat1, decimal lon1, decimal lat2, decimal lon2)
     {
-        if (lat1 == 0 || lon1 == 0 || lat2 == 0 || lon2 == 0)
-            return 1.0;
-
         const double EarthRadiusKm = 6371.0;
         var dLat = DegreesToRadians((double)(lat2 - lat1));
         var dLon = DegreesToRadians((double)(lon2 - lon1));
@@ -569,13 +569,24 @@ public class CheckoutController : ControllerBase
     private static decimal CalculateDeliveryFee(double distanceKm, DeliverySettings settings)
     {
         if (!settings.IsEnabled) return 0;
-        var baseKm = (double)settings.BaseDistanceKm;
-        if (distanceKm <= baseKm)
-            return settings.BaseFee;
-
-        // Formula: BaseFee + (Ceil(distanceKm) * PerKmFee)
-        // e.g. 5 km -> 400 + (5 * 50) = 650
-        var kmUnits = (decimal)Math.Ceiling(distanceKm);
+        var extraKm = Math.Max(0, distanceKm - (double)settings.BaseDistanceKm);
+        var kmUnits = (decimal)Math.Ceiling(extraKm);
         return settings.BaseFee + (kmUnits * settings.PerKmFee);
+    }
+
+    private static (decimal Fee, double FarthestDistanceKm) CalculateGroupDeliveryFee(
+        IReadOnlyCollection<Store> stores, decimal customerLatitude, decimal customerLongitude, DeliverySettings settings)
+    {
+        if (!settings.IsEnabled || stores.Count == 0) return (0, 0);
+        var charges = stores.Select(store =>
+        {
+            var distance = CalculateDistanceKm(store.Latitude, store.Longitude, customerLatitude, customerLongitude);
+            return (DistanceKm: distance, Fee: CalculateDeliveryFee(distance, settings));
+        }).OrderByDescending(item => item.DistanceKm).ToList();
+
+        if (charges.Count == 1) return (charges[0].Fee, charges[0].DistanceKm);
+
+        var combined = charges[0].Fee + charges.Skip(1).Sum(item => item.Fee) / 2m;
+        return (Math.Round(combined, 0, MidpointRounding.AwayFromZero), charges[0].DistanceKm);
     }
 }

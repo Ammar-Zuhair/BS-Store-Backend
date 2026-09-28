@@ -27,6 +27,9 @@ public record CheckoutValidationResult(
     double EstimatedDistanceKm = 0
 );
 
+public record DeliveryQuoteRequest(Guid? AddressId, List<Guid> StoreIds);
+public record DeliveryQuoteResult(decimal DeliveryFee, double FarthestDistanceKm);
+
 public record PlaceOrderRequest(
     Guid? AddressId,
     NewAddressInput? NewAddress,

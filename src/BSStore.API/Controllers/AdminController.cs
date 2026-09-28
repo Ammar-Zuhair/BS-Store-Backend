@@ -801,6 +801,8 @@ public class AdminController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Phone))
             return BadRequest(ApiResponse.Fail("اسم المتجر ورقم الهاتف حقول إلزامية"));
+        if (request.Latitude is < -90 or > 90 || request.Longitude is < -180 or > 180)
+            return BadRequest(ApiResponse.Fail("إحداثيات موقع المتجر غير صحيحة"));
 
         var store = new Store
         {
@@ -825,6 +827,8 @@ public class AdminController : ControllerBase
     {
         var store = await _db.Stores.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (store == null) return NotFound(ApiResponse.Fail("المتجر غير موجود"));
+        if (request.Latitude is < -90 or > 90 || request.Longitude is < -180 or > 180)
+            return BadRequest(ApiResponse.Fail("إحداثيات موقع المتجر غير صحيحة"));
 
         store.Name = request.Name;
         store.Phone = request.Phone;
