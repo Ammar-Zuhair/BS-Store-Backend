@@ -58,6 +58,36 @@ public class DriverController : ControllerBase
         return Ok(ApiResponse<DriverStatusDto>.Ok(dto));
     }
 
+    [HttpPost("financial/settlements")]
+    public async Task<IActionResult> RequestSettlement([FromBody] DriverSettlementRequest request, CancellationToken ct)
+    {
+        if (request.Amount <= 0) return BadRequest(ApiResponse.Fail("أدخل مبلغاً صحيحاً"));
+        var driver = await GetCurrentDriverAsync(ct);
+        if (driver == null) return NotFound(ApiResponse.Fail("ملف السائق غير موجود"));
+        var collections = await _db.DriverTransactions.Where(t => t.DriverId == driver.Id && t.Type == DriverTransactionType.CustomerCollection).SumAsync(t => (decimal?)t.Amount, ct) ?? 0;
+        var purchases = await _db.DriverTransactions.Where(t => t.DriverId == driver.Id && t.Type == DriverTransactionType.StorePurchase).SumAsync(t => (decimal?)t.Amount, ct) ?? 0;
+        var settlements = await _db.DriverTransactions.Where(t => t.DriverId == driver.Id && t.Type == DriverTransactionType.CompanySettlement).SumAsync(t => (decimal?)t.Amount, ct) ?? 0;
+        var fundings = await _db.DriverTransactions.Where(t => t.DriverId == driver.Id && t.Type == DriverTransactionType.DriverFunding).SumAsync(t => (decimal?)t.Amount, ct) ?? 0;
+        var outstanding = collections - purchases - settlements + fundings;
+        if (request.Amount > outstanding) return BadRequest(ApiResponse.Fail("المبلغ أكبر من العهدة المستحقة حالياً"));
+
+        _db.DriverSettlements.Add(new DriverSettlement { DriverId = driver.Id, Amount = request.Amount, Note = request.Note, CreatedBy = driver.UserId });
+        _db.DriverTransactions.Add(new DriverTransaction
+        {
+            DriverId = driver.Id,
+            Type = DriverTransactionType.CompanySettlement,
+            Amount = request.Amount,
+            Direction = TransactionDirection.Credit,
+            Reference = "طلب توريد",
+            Description = request.Note ?? "طلب توريد عهدة للإدارة",
+            CreatedBy = driver.UserId
+        });
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse.Ok("تم تسجيل طلب التوريد"));
+    }
+
+    public sealed record DriverSettlementRequest(decimal Amount, string? Note);
+
     /// <summary>Update driver online/offline status.</summary>
     [HttpPut("status")]
     [ProducesResponseType(typeof(ApiResponse<DriverStatusDto>), StatusCodes.Status200OK)]
@@ -93,6 +123,8 @@ public class DriverController : ControllerBase
             .ThenInclude(so => so.Store)
             .Include(o => o.SubOrders)
             .ThenInclude(so => so.Items)
+            .ThenInclude(item => item.Product)
+            .ThenInclude(product => product!.Images)
             .FirstOrDefaultAsync(ct);
 
         if (order == null)
@@ -119,6 +151,8 @@ public class DriverController : ControllerBase
             .ThenInclude(so => so.Store)
             .Include(o => o.SubOrders)
             .ThenInclude(so => so.Items)
+            .ThenInclude(item => item.Product)
+            .ThenInclude(product => product!.Images)
             .ToListAsync(ct);
 
         return Ok(ApiResponse<List<OrderDto>>.Ok(orders.Select(MapToDto).ToList()));
@@ -367,11 +401,20 @@ public class DriverController : ControllerBase
                     i.SellingPriceSnapshot,
                     i.Quantity,
                     i.TotalSellingPrice,
-                    i.ActualPurchasePrice
-                )).ToList()
+                    i.ActualPurchasePrice,
+                    i.Product?.Images.OrderBy(image => image.SortOrder).Select(image => image.Url ?? image.ImageKey).FirstOrDefault(),
+                    i.ExpectedPurchasePriceSnapshot
+                )).ToList(),
+                so.Store?.Address,
+                so.Store?.Latitude,
+                so.Store?.Longitude,
+                so.Store?.Phone,
+                so.Store?.ImageKey
             )).ToList(),
             o.Customer?.FullName ?? "عميل المنصة",
-            o.Customer?.User?.Phone ?? ""
+            o.Customer?.User?.Phone ?? "",
+            o.Address?.Latitude,
+            o.Address?.Longitude
         );
     }
 }

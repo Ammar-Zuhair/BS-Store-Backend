@@ -380,6 +380,7 @@ public class AdminController : ControllerBase
     {
         var drivers = await _db.Drivers
             .Include(d => d.Transactions)
+            .Include(d => d.User)
             .ToListAsync(ct);
 
         var list = drivers.Select(d =>
@@ -396,11 +397,42 @@ public class AdminController : ControllerBase
                 d.FullName,
                 d.Phone,
                 d.Status,
+                IsApproved = d.User.IsActive,
                 OutstandingDebt = outstanding
             };
         }).ToList();
 
         return Ok(ApiResponse<object>.Ok(list));
+    }
+
+    [HttpGet("drivers/pending")]
+    public async Task<IActionResult> GetPendingDrivers(CancellationToken ct)
+    {
+        var drivers = await _db.Drivers.AsNoTracking().Where(d => !d.User.IsActive)
+            .Select(d => new { d.Id, d.FullName, d.Phone, d.CreatedAt })
+            .OrderBy(d => d.CreatedAt).ToListAsync(ct);
+        return Ok(ApiResponse<object>.Ok(drivers));
+    }
+
+    [HttpPost("drivers/{id:guid}/approve")]
+    public async Task<IActionResult> ApproveDriver(Guid id, CancellationToken ct)
+    {
+        var driver = await _db.Drivers.Include(d => d.User).FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (driver == null) return NotFound(ApiResponse.Fail("طلب الموصل غير موجود"));
+        driver.User.IsActive = true;
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse.Ok("تمت الموافقة على حساب الموصل"));
+    }
+
+    [HttpDelete("drivers/{id:guid}/application")]
+    public async Task<IActionResult> RejectDriver(Guid id, CancellationToken ct)
+    {
+        var driver = await _db.Drivers.Include(d => d.User).FirstOrDefaultAsync(d => d.Id == id && !d.User.IsActive, ct);
+        if (driver == null) return NotFound(ApiResponse.Fail("طلب الموصل غير موجود أو تمت مراجعته"));
+        _db.Drivers.Remove(driver);
+        _db.Users.Remove(driver.User);
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse.Ok("تم رفض طلب الموصل"));
     }
 
     /// <summary>Record driver financial settlement (driver hand-over money to company).</summary>

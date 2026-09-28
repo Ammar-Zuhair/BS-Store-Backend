@@ -42,7 +42,8 @@ public class CheckoutController : ControllerBase
         var settings = await _db.DeliverySettings.FirstOrDefaultAsync(ct)
             ?? new DeliverySettings { BaseFee = 400, PerKmFee = 50, BaseDistanceKm = 1.0m, IsEnabled = true };
         var quote = CalculateGroupDeliveryFee(stores, address.Latitude, address.Longitude, settings);
-        return Ok(ApiResponse<DeliveryQuoteResult>.Ok(new DeliveryQuoteResult(quote.Fee, quote.FarthestDistanceKm)));
+        var storeFees = CalculateStoreDeliveryFees(stores, address.Latitude, address.Longitude, settings);
+        return Ok(ApiResponse<DeliveryQuoteResult>.Ok(new DeliveryQuoteResult(quote.Fee, quote.FarthestDistanceKm, storeFees)));
     }
 
     /// <summary>Validate checkout items, prices, delivery fee and COD eligibility.</summary>
@@ -580,11 +581,19 @@ public class CheckoutController : ControllerBase
                     i.SellingPriceSnapshot,
                     i.Quantity,
                     i.TotalSellingPrice,
-                    i.ActualPurchasePrice
-                )).ToList()
+                    i.ActualPurchasePrice,
+                    i.Product?.Images.OrderBy(image => image.SortOrder).Select(image => image.Url ?? image.ImageKey).FirstOrDefault()
+                )).ToList(),
+                so.Store?.Address,
+                so.Store?.Latitude,
+                so.Store?.Longitude,
+                so.Store?.Phone,
+                so.Store?.ImageKey
             )).ToList(),
             o.Customer?.FullName ?? "عميل المنصة",
-            o.Customer?.User?.Phone ?? ""
+            o.Customer?.User?.Phone ?? "",
+            o.Address?.Latitude,
+            o.Address?.Longitude
         );
     }
 
@@ -634,5 +643,20 @@ public class CheckoutController : ControllerBase
 
         var combined = charges[0].Fee + charges.Skip(1).Sum(item => item.Fee) / 2m;
         return (Math.Round(combined, 0, MidpointRounding.AwayFromZero), charges[0].DistanceKm);
+    }
+
+    private static List<StoreDeliveryQuote> CalculateStoreDeliveryFees(
+        IReadOnlyCollection<Store> stores, decimal customerLatitude, decimal customerLongitude, DeliverySettings settings)
+    {
+        if (!settings.IsEnabled || stores.Count == 0) return [];
+        var charges = stores.Select(store => new
+        {
+            store.Id,
+            Distance = CalculateDistanceKm(store.Latitude, store.Longitude, customerLatitude, customerLongitude),
+            Fee = CalculateDeliveryFee(CalculateDistanceKm(store.Latitude, store.Longitude, customerLatitude, customerLongitude), settings)
+        }).OrderByDescending(item => item.Distance).ToList();
+        return charges.Select((charge, index) => new StoreDeliveryQuote(charge.Id, index == 0
+            ? charge.Fee
+            : charge.Fee / 2m)).ToList();
     }
 }

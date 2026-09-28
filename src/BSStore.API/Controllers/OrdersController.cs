@@ -46,6 +46,8 @@ public class OrdersController : ControllerBase
             .ThenInclude(so => so.Store)
             .Include(o => o.SubOrders)
             .ThenInclude(so => so.Items)
+            .ThenInclude(item => item.Product)
+            .ThenInclude(product => product!.Images)
             .ToListAsync(ct);
 
         var dtos = orders.Select(MapToDto).ToList();
@@ -71,6 +73,8 @@ public class OrdersController : ControllerBase
             .ThenInclude(so => so.Store)
             .Include(o => o.SubOrders)
             .ThenInclude(so => so.Items)
+            .ThenInclude(item => item.Product)
+            .ThenInclude(product => product!.Images)
             .FirstOrDefaultAsync(ct);
 
         if (order == null)
@@ -200,11 +204,19 @@ public class OrdersController : ControllerBase
                     i.SellingPriceSnapshot,
                     i.Quantity,
                     i.TotalSellingPrice,
-                    i.ActualPurchasePrice
-                )).ToList()
+                    i.ActualPurchasePrice,
+                    i.Product?.Images.OrderBy(image => image.SortOrder).Select(image => image.Url ?? image.ImageKey).FirstOrDefault()
+                )).ToList(),
+                so.Store?.Address,
+                so.Store?.Latitude,
+                so.Store?.Longitude,
+                so.Store?.Phone,
+                so.Store?.ImageKey
             )).ToList(),
             o.Customer?.FullName ?? "عميل المنصة",
-            o.Customer?.User?.Phone ?? ""
+            o.Customer?.User?.Phone ?? "",
+            o.Address?.Latitude,
+            o.Address?.Longitude
         );
     }
 }

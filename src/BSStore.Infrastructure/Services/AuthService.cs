@@ -89,6 +89,9 @@ public class AuthService : IAuthService
         if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             throw new BusinessRuleException("رقم الهاتف أو كلمة المرور غير صحيحة.", "INVALID_CREDENTIALS");
 
+        if (!user.IsActive && user.Role == UserRole.Driver && user.Driver != null)
+            throw new BusinessRuleException("طلب حسابك بانتظار موافقة مدير النظام.", "DRIVER_PENDING_APPROVAL");
+
         if (!user.IsActive)
             throw new BusinessRuleException("الحساب موقوف. تواصل مع الإدارة.", "ACCOUNT_SUSPENDED");
 

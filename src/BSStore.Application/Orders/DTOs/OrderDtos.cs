@@ -28,7 +28,8 @@ public record CheckoutValidationResult(
 );
 
 public record DeliveryQuoteRequest(Guid? AddressId, List<Guid> StoreIds);
-public record DeliveryQuoteResult(decimal DeliveryFee, double FarthestDistanceKm);
+public record StoreDeliveryQuote(Guid StoreId, decimal DeliveryFee);
+public record DeliveryQuoteResult(decimal DeliveryFee, double FarthestDistanceKm, List<StoreDeliveryQuote> StoreFees);
 
 public record PlaceOrderRequest(
     Guid? AddressId,
@@ -59,7 +60,9 @@ public record OrderItemDto(
     decimal UnitPrice,
     int Quantity,
     decimal TotalPrice,
-    decimal? ActualPurchasePrice
+    decimal? ActualPurchasePrice,
+    string? ImageUrl = null,
+    decimal? ExpectedPurchasePrice = null
 )
 {
     public string ProductNameSnapshot => ProductName;
@@ -72,7 +75,12 @@ public record SubOrderDto(
     string StoreName,
     OrderStatus Status,
     decimal SubTotal,
-    List<OrderItemDto> Items
+    List<OrderItemDto> Items,
+    string? StoreAddress = null,
+    decimal? StoreLatitude = null,
+    decimal? StoreLongitude = null,
+    string? StorePhone = null,
+    string? StoreImageUrl = null
 );
 
 public record OrderDto(
@@ -92,7 +100,9 @@ public record OrderDto(
     string DeliveryAddress,
     List<SubOrderDto> SubOrders,
     string? CustomerName = null,
-    string? CustomerPhone = null
+    string? CustomerPhone = null,
+    decimal? CustomerLatitude = null,
+    decimal? CustomerLongitude = null
 );
 
 public record CancelOrderRequest(
