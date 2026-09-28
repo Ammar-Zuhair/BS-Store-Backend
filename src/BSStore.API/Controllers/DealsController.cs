@@ -42,9 +42,9 @@ public class DealsController : ControllerBase
                 .Where(deal =>
                     (!deal.TryGetProperty("isActive", out var active) || active.ValueKind != JsonValueKind.False) &&
                     (!deal.TryGetProperty("isPublic", out var isPublic) || isPublic.ValueKind != JsonValueKind.False) &&
-                    (!deal.TryGetProperty("expiresAt", out var expiry) ||
-                     expiry.ValueKind != JsonValueKind.String ||
-                     (DateTimeOffset.TryParse(expiry.GetString(), out var parsedExpiry) && parsedExpiry > now)))
+                    deal.TryGetProperty("expiresAt", out var expiry) &&
+                    expiry.ValueKind == JsonValueKind.String &&
+                    DateTimeOffset.TryParse(expiry.GetString(), out var parsedExpiry) && parsedExpiry > now)
                 .Select(deal => deal.Clone())
                 .ToArray();
 
