@@ -37,7 +37,8 @@ public record PlaceOrderRequest(
     string? Notes,
     string? IdempotencyKey,
     List<CheckoutItemInput>? Items = null,
-    string? DeliveryDealId = null
+    string? DeliveryDealId = null,
+    string? CouponCode = null
 );
 
 public record NewAddressInput(

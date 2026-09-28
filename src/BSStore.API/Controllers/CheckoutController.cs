@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BSStore.Application.Common;
 using BSStore.Application.Orders.DTOs;
 using BSStore.Domain.Entities;
@@ -399,7 +400,7 @@ public class CheckoutController : ControllerBase
             deliveryFee = CalculateGroupDeliveryFee(stores, address.Latitude, address.Longitude, deliverySettings).Fee;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.DeliveryDealId))
+        if (string.IsNullOrWhiteSpace(request.CouponCode) && !string.IsNullOrWhiteSpace(request.DeliveryDealId))
         {
             var dealsSetting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "FlashDeals", ct);
             if (dealsSetting != null && !string.IsNullOrWhiteSpace(dealsSetting.Value))
@@ -429,6 +430,51 @@ public class CheckoutController : ControllerBase
         }
 
         var discount = 0m;
+        if (!string.IsNullOrWhiteSpace(request.CouponCode))
+        {
+            var couponSetting = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "FlashDeals", ct);
+            JsonElement coupon = default;
+            if (couponSetting != null && !string.IsNullOrWhiteSpace(couponSetting.Value))
+            {
+                try
+                {
+                    using var couponDoc = System.Text.Json.JsonDocument.Parse(couponSetting.Value);
+                    if (couponDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        coupon = couponDoc.RootElement.EnumerateArray().FirstOrDefault(item =>
+                            item.TryGetProperty("couponCode", out var storedCode) &&
+                            string.Equals(storedCode.GetString()?.Trim(), request.CouponCode.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                            (!item.TryGetProperty("isActive", out var active) || active.ValueKind != System.Text.Json.JsonValueKind.False) &&
+                            item.TryGetProperty("expiresAt", out var expires) &&
+                            DateTimeOffset.TryParse(expires.GetString(), out var expiry) && expiry > DateTimeOffset.UtcNow);
+                    }
+                }
+                catch (System.Text.Json.JsonException) { }
+            }
+
+            if (coupon.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                await tx.RollbackAsync(ct);
+                return BadRequest(ApiResponse.Fail("كود الخصم غير صالح أو منتهي"));
+            }
+
+            var couponKind = coupon.TryGetProperty("discountKind", out var couponKindElement) ? couponKindElement.GetString() : null;
+            if (couponKind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") && coupon.TryGetProperty("dealType", out var couponTypeElement))
+                couponKind = couponTypeElement.GetString();
+            var couponPercent = couponKind == "DELIVERY_DISCOUNT" && coupon.TryGetProperty("deliveryDiscountPercent", out var deliveryPercentElement) && deliveryPercentElement.TryGetDecimal(out var parsedDeliveryPercent)
+                ? parsedDeliveryPercent
+                : coupon.TryGetProperty("discountPercent", out var couponPercentElement) && couponPercentElement.TryGetDecimal(out var parsedCouponPercent) ? parsedCouponPercent : 0m;
+            if (couponKind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") || couponPercent is <= 0 or > 100)
+            {
+                await tx.RollbackAsync(ct);
+                return BadRequest(ApiResponse.Fail("كود الخصم غير صالح"));
+            }
+
+            if (couponKind == "DELIVERY_DISCOUNT")
+                deliveryFee = Math.Round(deliveryFee * (100m - couponPercent) / 100m, 0, MidpointRounding.AwayFromZero);
+            else
+                discount = Math.Round(subTotal * couponPercent / 100m, 0, MidpointRounding.AwayFromZero);
+        }
         var totalAmount = subTotal + deliveryFee - discount;
 
         if (request.PaymentMethod == PaymentMethod.CashOnDelivery && totalAmount > paymentSettings.CashOnDeliveryLimit)
