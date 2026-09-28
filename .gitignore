@@ -11,3 +11,4 @@ logs/
 .vscode/
 publish/
 tunnel_url.txt
+.restart-trigger

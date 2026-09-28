@@ -277,6 +277,24 @@ try
         service = "BS Store API",
         timestamp = DateTime.UtcNow
     }));
+    app.MapGet("/api/health", () => Results.Ok(new
+    {
+        status = "healthy",
+        service = "BS Store API",
+        timestamp = DateTime.UtcNow
+    }));
+
+    // ─── Programmatic Restart Endpoint (Graceful shutdown, auto-restarted by systemd) ───
+    app.MapPost("/api/system/restart", (IHostApplicationLifetime lifetime) =>
+    {
+        Log.Information("System restart requested via /api/system/restart endpoint.");
+        Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            lifetime.StopApplication();
+        });
+        return Results.Ok(new { message = "Restarting backend service..." });
+    });
 
     app.MapControllers();
 
