@@ -430,12 +430,17 @@ public class CheckoutController : ControllerBase
                     using var couponDoc = System.Text.Json.JsonDocument.Parse(couponSetting.Value);
                     if (couponDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                     {
-                        coupon = couponDoc.RootElement.EnumerateArray().FirstOrDefault(item =>
+                        var matchedItem = couponDoc.RootElement.EnumerateArray().FirstOrDefault(item =>
                             item.TryGetProperty("couponCode", out var storedCode) &&
                             string.Equals(storedCode.GetString()?.Trim(), request.CouponCode.Trim(), StringComparison.OrdinalIgnoreCase) &&
                             (!item.TryGetProperty("isActive", out var active) || active.ValueKind != System.Text.Json.JsonValueKind.False) &&
                             item.TryGetProperty("expiresAt", out var expires) &&
                             DateTimeOffset.TryParse(expires.GetString(), out var expiry) && expiry > DateTimeOffset.UtcNow);
+
+                        if (matchedItem.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            coupon = matchedItem.Clone();
+                        }
                     }
                 }
                 catch (System.Text.Json.JsonException) { }
@@ -449,9 +454,43 @@ public class CheckoutController : ControllerBase
             var couponKind = coupon.TryGetProperty("discountKind", out var couponKindElement) ? couponKindElement.GetString() : null;
             if (couponKind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") && coupon.TryGetProperty("dealType", out var couponTypeElement))
                 couponKind = couponTypeElement.GetString();
-            var couponPercent = couponKind == "DELIVERY_DISCOUNT" && coupon.TryGetProperty("deliveryDiscountPercent", out var deliveryPercentElement) && deliveryPercentElement.TryGetDecimal(out var parsedDeliveryPercent)
-                ? parsedDeliveryPercent
-                : coupon.TryGetProperty("discountPercent", out var couponPercentElement) && couponPercentElement.TryGetDecimal(out var parsedCouponPercent) ? parsedCouponPercent : 0m;
+
+            decimal couponPercent = 0m;
+            if (couponKind == "DELIVERY_DISCOUNT")
+            {
+                couponPercent = coupon.TryGetProperty("deliveryDiscountPercent", out var deliveryPercentElement) && deliveryPercentElement.TryGetDecimal(out var parsedDeliveryPercent)
+                    ? parsedDeliveryPercent : 0m;
+            }
+            else
+            {
+                if (coupon.TryGetProperty("discountTiers", out var tiersEl) && tiersEl.ValueKind == JsonValueKind.Array && tiersEl.GetArrayLength() > 0)
+                {
+                    var tiers = new List<(decimal Min, decimal? Max, decimal Pct)>();
+                    foreach (var t in tiersEl.EnumerateArray())
+                    {
+                        var min = t.TryGetProperty("minAmount", out var minEl) && minEl.TryGetDecimal(out var parsedMin) ? parsedMin : 0m;
+                        decimal? max = t.TryGetProperty("maxAmount", out var maxEl) && maxEl.ValueKind == JsonValueKind.Number && maxEl.TryGetDecimal(out var parsedMax) ? parsedMax : null;
+                        var pct = t.TryGetProperty("discountPercent", out var pctEl) && pctEl.TryGetDecimal(out var parsedPct) ? parsedPct : 0m;
+                        tiers.Add((min, max, pct));
+                    }
+                    tiers = tiers.OrderBy(t => t.Min).ToList();
+                    var matched = tiers.FirstOrDefault(t => subTotal >= t.Min && (!t.Max.HasValue || t.Max.Value <= 0 || subTotal < t.Max.Value));
+                    if (matched.Pct > 0)
+                    {
+                        couponPercent = matched.Pct;
+                    }
+                    else if (tiers.Count > 0)
+                    {
+                        couponPercent = (subTotal >= tiers.Last().Min ? tiers.Last() : tiers.First()).Pct;
+                    }
+                }
+
+                if (couponPercent <= 0)
+                {
+                    couponPercent = coupon.TryGetProperty("discountPercent", out var couponPercentElement) && couponPercentElement.TryGetDecimal(out var parsedCouponPercent) ? parsedCouponPercent : 0m;
+                }
+            }
+
             if (couponKind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") || couponPercent is <= 0 or > 100)
             {
                 return BadRequest(ApiResponse.Fail("كود الخصم غير صالح"));

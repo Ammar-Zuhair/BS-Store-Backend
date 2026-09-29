@@ -80,12 +80,69 @@ public class DealsController : ControllerBase
             if (deal.ValueKind != JsonValueKind.Object) return NotFound(new { message = "كود الخصم غير صالح أو منتهي" });
             var kind = deal.TryGetProperty("discountKind", out var discountKind) ? discountKind.GetString() : null;
             if (kind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") && deal.TryGetProperty("dealType", out var dealType)) kind = dealType.GetString();
-            var percent = kind == "DELIVERY_DISCOUNT" && deal.TryGetProperty("deliveryDiscountPercent", out var deliveryPercent) && deliveryPercent.TryGetDecimal(out var parsedDeliveryPercent)
-                ? parsedDeliveryPercent
-                : deal.TryGetProperty("discountPercent", out var discountPercent) && discountPercent.TryGetDecimal(out var parsedDiscountPercent) ? parsedDiscountPercent : 0m;
-            if (kind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") || percent is <= 0 or > 100)
+            if (kind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT"))
                 return NotFound(new { message = "كود الخصم غير صالح أو منتهي" });
-            return Ok(new { code = code.ToUpperInvariant(), discountKind = kind, discountPercent = percent });
+
+            decimal percent = 0m;
+            var isTiered = false;
+            string? message = null;
+            List<object>? returnTiers = null;
+
+            if (kind == "DELIVERY_DISCOUNT")
+            {
+                percent = deal.TryGetProperty("deliveryDiscountPercent", out var deliveryPercent) && deliveryPercent.TryGetDecimal(out var parsedDeliveryPercent)
+                    ? parsedDeliveryPercent : 0m;
+            }
+            else
+            {
+                // PRODUCT_DISCOUNT (خصم من إجمالي الطلب)
+                if (deal.TryGetProperty("discountTiers", out var tiersEl) && tiersEl.ValueKind == JsonValueKind.Array && tiersEl.GetArrayLength() > 0)
+                {
+                    isTiered = true;
+                    returnTiers = new List<object>();
+                    var tiers = new List<(decimal Min, decimal? Max, decimal Pct)>();
+                    foreach (var t in tiersEl.EnumerateArray())
+                    {
+                        var min = t.TryGetProperty("minAmount", out var minEl) && minEl.TryGetDecimal(out var parsedMin) ? parsedMin : 0m;
+                        decimal? max = t.TryGetProperty("maxAmount", out var maxEl) && maxEl.ValueKind == JsonValueKind.Number && maxEl.TryGetDecimal(out var parsedMax) ? parsedMax : null;
+                        var pct = t.TryGetProperty("discountPercent", out var pctEl) && pctEl.TryGetDecimal(out var parsedPct) ? parsedPct : 0m;
+                        tiers.Add((min, max, pct));
+                        returnTiers.Add(new { minAmount = min, maxAmount = max, discountPercent = pct });
+                    }
+
+                    var cartSubtotal = request.CartSubtotal ?? 0m;
+                    tiers = tiers.OrderBy(t => t.Min).ToList();
+                    var matched = tiers.FirstOrDefault(t => cartSubtotal >= t.Min && (!t.Max.HasValue || t.Max.Value <= 0 || cartSubtotal < t.Max.Value));
+                    if (matched.Pct > 0)
+                    {
+                        percent = matched.Pct;
+                        message = $"تم تطبيق خصم {percent:G29}% للشريحة المقابلة لإجمالي سلتك ({cartSubtotal:N0} ريال)";
+                    }
+                    else if (tiers.Count > 0)
+                    {
+                        var defaultTier = cartSubtotal >= tiers.Last().Min ? tiers.Last() : tiers.First();
+                        percent = defaultTier.Pct;
+                        message = $"تم تفعيل كود الخصم بنسبة {percent:G29}%";
+                    }
+                }
+                else
+                {
+                    percent = deal.TryGetProperty("discountPercent", out var discountPercent) && discountPercent.TryGetDecimal(out var parsedDiscountPercent) ? parsedDiscountPercent : 0m;
+                }
+            }
+
+            if (percent is <= 0 or > 100)
+                return NotFound(new { message = "كود الخصم غير صالح أو منتهي" });
+
+            return Ok(new
+            {
+                code = code.ToUpperInvariant(),
+                discountKind = kind,
+                discountPercent = percent,
+                isTiered,
+                discountTiers = returnTiers,
+                message = message ?? (kind == "DELIVERY_DISCOUNT" ? $"خصم {percent:G29}% على رسوم التوصيل" : $"خصم {percent:G29}% على إجمالي الطلب")
+            });
         }
         catch (JsonException)
         {
@@ -93,5 +150,5 @@ public class DealsController : ControllerBase
         }
     }
 
-    public sealed record CouponCodeRequest(string? Code);
+    public sealed record CouponCodeRequest(string? Code, decimal? CartSubtotal = null);
 }
