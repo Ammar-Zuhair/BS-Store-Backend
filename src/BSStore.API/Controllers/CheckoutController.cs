@@ -283,6 +283,7 @@ public class CheckoutController : ControllerBase
 
         // Address resolution
         Address? address = null;
+        var isNewAddress = false;
         if (request.AddressId.HasValue)
         {
             address = customer.Addresses.FirstOrDefault(a => a.Id == request.AddressId.Value);
@@ -302,7 +303,7 @@ public class CheckoutController : ControllerBase
                 Longitude = request.NewAddress.Longitude,
                 IsDefault = !customer.Addresses.Any()
             };
-            _db.Addresses.Add(address);
+            isNewAddress = true;
         }
 
         if (address == null)
@@ -314,9 +315,7 @@ public class CheckoutController : ControllerBase
         var paymentSettings = await _db.PaymentSettings.FirstOrDefaultAsync(ct)
             ?? new PaymentSettings { CashOnDeliveryLimit = 50000 };
 
-        // Begin DB Transaction for atomic order creation and inventory reservation
-        using var tx = await _db.Database.BeginTransactionAsync(ct);
-
+        var stockReservations = new List<(Product Product, int Quantity)>();
         decimal subTotal = 0;
         var subOrdersList = new List<SubOrder>();
 
@@ -335,7 +334,6 @@ public class CheckoutController : ControllerBase
                 var product = ci.Product;
                 if (!product.IsActive)
                 {
-                    await tx.RollbackAsync(ct);
                     return BadRequest(ApiResponse.Fail($"المنتج '{product.Name}' غير متاح حالياً"));
                 }
 
@@ -344,19 +342,9 @@ public class CheckoutController : ControllerBase
                 {
                     if (product.Inventory == null || product.Inventory.Quantity < ci.Quantity)
                     {
-                        await tx.RollbackAsync(ct);
                         return BadRequest(ApiResponse.Fail($"الكمية المطلوبة من '{product.Name}' غير متوفرة"));
                     }
-
-                    // Decrement stock & record reservation
-                    product.Inventory.Quantity -= ci.Quantity;
-                    _db.InventoryTransactions.Add(new InventoryTransaction
-                    {
-                        ProductId = product.Id,
-                        Type = InventoryTransactionType.Reservation,
-                        Quantity = ci.Quantity,
-                        Note = $"حجز كمية للطلب الجديد"
-                    });
+                    stockReservations.Add((product, ci.Quantity));
                 }
 
                 var itemTotal = product.SellingPrice * ci.Quantity;
@@ -455,7 +443,6 @@ public class CheckoutController : ControllerBase
 
             if (coupon.ValueKind != System.Text.Json.JsonValueKind.Object)
             {
-                await tx.RollbackAsync(ct);
                 return BadRequest(ApiResponse.Fail("كود الخصم غير صالح أو منتهي"));
             }
 
@@ -467,7 +454,6 @@ public class CheckoutController : ControllerBase
                 : coupon.TryGetProperty("discountPercent", out var couponPercentElement) && couponPercentElement.TryGetDecimal(out var parsedCouponPercent) ? parsedCouponPercent : 0m;
             if (couponKind is not ("DELIVERY_DISCOUNT" or "PRODUCT_DISCOUNT") || couponPercent is <= 0 or > 100)
             {
-                await tx.RollbackAsync(ct);
                 return BadRequest(ApiResponse.Fail("كود الخصم غير صالح"));
             }
 
@@ -480,7 +466,6 @@ public class CheckoutController : ControllerBase
 
         if (request.PaymentMethod == PaymentMethod.CashOnDelivery && totalAmount > paymentSettings.CashOnDeliveryLimit)
         {
-            await tx.RollbackAsync(ct);
             return BadRequest(ApiResponse.Fail($"تجاوزت قيمة الطلب الحد المسموح للدفع عند الاستلام ({paymentSettings.CashOnDeliveryLimit:N0} ريال)"));
         }
 
@@ -532,16 +517,6 @@ public class CheckoutController : ControllerBase
             }
         }
 
-        // Create Payment record
-        var payment = new Payment
-        {
-            Order = order,
-            Method = request.PaymentMethod,
-            Status = initialPaymentStatus,
-            Amount = totalAmount
-        };
-        _db.Payments.Add(payment);
-
         // Add Status History
         order.StatusHistory.Add(new OrderStatusHistory
         {
@@ -554,21 +529,58 @@ public class CheckoutController : ControllerBase
                 : "إنشاء الطلب بانتظار مراجعة الإدارة"
         });
 
-        // Clear Cart items if any
-        if (customer.Cart?.Items != null && customer.Cart.Items.Count > 0)
+        // Use execution strategy for safe atomic database commit with retrying strategy
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<IActionResult>(async () =>
         {
-            _db.CartItems.RemoveRange(customer.Cart.Items);
-        }
+            using var tx = await _db.Database.BeginTransactionAsync(ct);
 
-        _db.Orders.Add(order);
-        await _db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
+            if (isNewAddress && address != null)
+            {
+                _db.Addresses.Add(address);
+            }
 
-        // Load store names and customer user for clean DTO
-        await _db.Entry(order).Collection(o => o.SubOrders).Query().Include(so => so.Store).LoadAsync(ct);
-        await _db.Entry(order).Reference(o => o.Customer).Query().Include(c => c.User).LoadAsync(ct);
+            foreach (var stockItem in stockReservations)
+            {
+                if (stockItem.Product.Inventory != null)
+                {
+                    stockItem.Product.Inventory.Quantity -= stockItem.Quantity;
+                }
+                _db.InventoryTransactions.Add(new InventoryTransaction
+                {
+                    ProductId = stockItem.Product.Id,
+                    Type = InventoryTransactionType.Reservation,
+                    Quantity = stockItem.Quantity,
+                    Note = "حجز كمية للطلب الجديد"
+                });
+            }
 
-        return Ok(ApiResponse<OrderDto>.Ok(MapToDto(order), "تم إنشاء طلبك بنجاح!"));
+            // Create Payment record
+            var payment = new Payment
+            {
+                Order = order,
+                Method = request.PaymentMethod,
+                Status = initialPaymentStatus,
+                Amount = totalAmount
+            };
+            _db.Payments.Add(payment);
+
+            // Clear Cart items if any
+            if (customer.Cart?.Items != null && customer.Cart.Items.Count > 0)
+            {
+                _db.CartItems.RemoveRange(customer.Cart.Items);
+            }
+
+            _db.Orders.Add(order);
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            // Load store names and customer user for clean DTO
+            await _db.Entry(order).Collection(o => o.SubOrders).Query().Include(so => so.Store).LoadAsync(ct);
+            await _db.Entry(order).Reference(o => o.Customer).Query().Include(c => c.User).LoadAsync(ct);
+
+            return Ok(ApiResponse<OrderDto>.Ok(MapToDto(order), "تم إنشاء طلبك بنجاح!"));
+        });
     }
 
     private static OrderDto MapToDto(Order o)

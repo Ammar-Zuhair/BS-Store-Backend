@@ -138,55 +138,59 @@ public class OrdersController : ControllerBase
             return BadRequest(ApiResponse.Fail("لا يمكن إلغاء الطلب في حالته الحالية"));
         }
 
-        using var tx = await _db.Database.BeginTransactionAsync(ct);
-
-        var oldStatus = order.Status;
-        order.Status = OrderStatus.Cancelled;
-
-        // Release reserved inventory for InStock products
-        foreach (var subOrder in order.SubOrders)
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<IActionResult>(async () =>
         {
-            subOrder.Status = OrderStatus.Cancelled;
-            foreach (var item in subOrder.Items)
+            using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+            var oldStatus = order.Status;
+            order.Status = OrderStatus.Cancelled;
+
+            // Release reserved inventory for InStock products
+            foreach (var subOrder in order.SubOrders)
             {
-                if (item.Product != null && item.Product.SourceType == SourceType.InStock && item.Product.Inventory != null)
+                subOrder.Status = OrderStatus.Cancelled;
+                foreach (var item in subOrder.Items)
                 {
-                    item.Product.Inventory.Quantity += item.Quantity;
-                    _db.InventoryTransactions.Add(new InventoryTransaction
+                    if (item.Product != null && item.Product.SourceType == SourceType.InStock && item.Product.Inventory != null)
                     {
-                        ProductId = item.Product.Id,
-                        OrderId = order.Id,
-                        Type = InventoryTransactionType.Release,
-                        Quantity = item.Quantity,
-                        Note = $"إلغاء حجز كمية لإلغاء الطلب {order.OrderNumber}"
-                    });
+                        item.Product.Inventory.Quantity += item.Quantity;
+                        _db.InventoryTransactions.Add(new InventoryTransaction
+                        {
+                            ProductId = item.Product.Id,
+                            OrderId = order.Id,
+                            Type = InventoryTransactionType.Release,
+                            Quantity = item.Quantity,
+                            Note = $"إلغاء حجز كمية لإلغاء الطلب {order.OrderNumber}"
+                        });
+                    }
                 }
             }
-        }
 
-        // Record OrderCancellation
-        _db.OrderCancellations.Add(new OrderCancellation
-        {
-            OrderId = order.Id,
-            ReasonCode = request.ReasonCode,
-            Description = request.Description,
-            CancelledBy = userId
+            // Record OrderCancellation
+            _db.OrderCancellations.Add(new OrderCancellation
+            {
+                OrderId = order.Id,
+                ReasonCode = request.ReasonCode,
+                Description = request.Description,
+                CancelledBy = userId
+            });
+
+            // Record history
+            order.StatusHistory.Add(new OrderStatusHistory
+            {
+                OldStatus = oldStatus,
+                NewStatus = OrderStatus.Cancelled,
+                ActorType = isAdmin ? "Admin" : "Customer",
+                ActorId = userId,
+                Reason = request.Description ?? request.ReasonCode
+            });
+
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            return Ok(ApiResponse.Ok("تم إلغاء الطلب بنجاح"));
         });
-
-        // Record history
-        order.StatusHistory.Add(new OrderStatusHistory
-        {
-            OldStatus = oldStatus,
-            NewStatus = OrderStatus.Cancelled,
-            ActorType = isAdmin ? "Admin" : "Customer",
-            ActorId = userId,
-            Reason = request.Description ?? request.ReasonCode
-        });
-
-        await _db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
-
-        return Ok(ApiResponse.Ok("تم إلغاء الطلب بنجاح"));
     }
 
     private static OrderDto MapToDto(Order o)
