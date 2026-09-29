@@ -25,6 +25,25 @@ public class OrdersController : ControllerBase
 
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue("userId")!);
 
+    [HttpPost("{id:guid}/review")]
+    public async Task<IActionResult> SubmitReview(Guid id, [FromBody] OrderReviewRequest request, CancellationToken ct)
+    {
+        if (request.Rating is < 1 or > 5 || string.IsNullOrWhiteSpace(request.Comment))
+            return BadRequest(ApiResponse.Fail("اختر تقييماً من نجمة إلى خمس واكتب ملاحظتك"));
+        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.UserId == GetUserId(), ct);
+        var order = await _db.Orders.FirstOrDefaultAsync(o => o.Id == id && customer != null && o.CustomerId == customer.Id, ct);
+        if (order == null) return NotFound(ApiResponse.Fail("الطلب غير موجود"));
+        if (order.Status != OrderStatus.Delivered) return BadRequest(ApiResponse.Fail("يمكن تقييم الطلب بعد توصيله فقط"));
+        if (order.CustomerRating.HasValue) return Conflict(ApiResponse.Fail("سبق لك تقييم هذا الطلب"));
+        order.CustomerRating = request.Rating;
+        order.CustomerReview = request.Comment.Trim();
+        order.CustomerRatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse.Ok("شكراً لتقييمك"));
+    }
+
+    public sealed record OrderReviewRequest(int Rating, string Comment);
+
     /// <summary>Get list of orders for current customer.</summary>
     [HttpGet]
     [ProducesResponseType(typeof(ApiResponse<List<OrderDto>>), StatusCodes.Status200OK)]
@@ -216,7 +235,10 @@ public class OrdersController : ControllerBase
             o.Customer?.FullName ?? "عميل المنصة",
             o.Customer?.User?.Phone ?? "",
             o.Address?.Latitude,
-            o.Address?.Longitude
+            o.Address?.Longitude,
+            o.CustomerRating,
+            o.CustomerReview,
+            o.CustomerRatedAt
         );
     }
 }

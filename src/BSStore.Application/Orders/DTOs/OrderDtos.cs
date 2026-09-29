@@ -102,7 +102,10 @@ public record OrderDto(
     string? CustomerName = null,
     string? CustomerPhone = null,
     decimal? CustomerLatitude = null,
-    decimal? CustomerLongitude = null
+    decimal? CustomerLongitude = null,
+    int? CustomerRating = null,
+    string? CustomerReview = null,
+    DateTime? CustomerRatedAt = null
 );
 
 public record CancelOrderRequest(

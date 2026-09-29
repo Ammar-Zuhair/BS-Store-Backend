@@ -17,6 +17,9 @@ public class Order : BaseEntity
     public decimal Discount { get; set; }
     public decimal TotalAmount { get; set; }
     public string? Notes { get; set; }
+    public int? CustomerRating { get; set; }
+    public string? CustomerReview { get; set; }
+    public DateTime? CustomerRatedAt { get; set; }
 
     /// <summary>Used to prevent duplicate order submissions from client retries.</summary>
     public string? IdempotencyKey { get; set; }

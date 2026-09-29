@@ -14,5 +14,6 @@ public enum OrderStatus
     Delivered,
     Cancelled,
     PaymentFailed,
-    Returned
+    Returned,
+    PendingAdminApproval
 }

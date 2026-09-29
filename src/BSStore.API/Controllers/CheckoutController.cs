@@ -485,8 +485,11 @@ public class CheckoutController : ControllerBase
         }
 
         // Determine Initial Order and Payment Status
+        var deliveredOrders = await _db.Orders.CountAsync(o =>
+            o.CustomerId == customer.Id && o.Status == OrderStatus.Delivered, ct);
+        var isTrustedCustomer = deliveredOrders >= 10;
         var initialOrderStatus = request.PaymentMethod == PaymentMethod.CashOnDelivery
-            ? OrderStatus.Confirmed
+            ? (isTrustedCustomer ? OrderStatus.SearchingDriver : OrderStatus.PendingAdminApproval)
             : OrderStatus.PendingPayment;
 
         var initialPaymentStatus = PaymentStatus.Pending;
@@ -510,6 +513,25 @@ public class CheckoutController : ControllerBase
             SubOrders = subOrdersList
         };
 
+        if (isTrustedCustomer && initialOrderStatus == OrderStatus.SearchingDriver)
+        {
+            var availableDrivers = await _db.Drivers
+                .Where(d => d.Status == DriverStatus.Online && d.User.IsActive)
+                .Select(d => new
+                {
+                    Driver = d,
+                    ActiveOrders = _db.Orders.Count(o => o.DriverId == d.Id && o.Status != OrderStatus.Delivered && o.Status != OrderStatus.Cancelled && o.Status != OrderStatus.Returned)
+                })
+                .OrderBy(x => x.ActiveOrders)
+                .ThenBy(x => x.Driver.CreatedAt)
+                .ToListAsync(ct);
+            if (availableDrivers.Count > 0)
+            {
+                order.Driver = availableDrivers[0].Driver;
+                order.Status = OrderStatus.DriverAssigned;
+            }
+        }
+
         // Create Payment record
         var payment = new Payment
         {
@@ -524,10 +546,12 @@ public class CheckoutController : ControllerBase
         order.StatusHistory.Add(new OrderStatusHistory
         {
             OldStatus = OrderStatus.PendingPayment,
-            NewStatus = initialOrderStatus,
+            NewStatus = order.Status,
             ActorType = "Customer",
             ActorId = userId,
-            Reason = "إنشاء الطلب"
+            Reason = isTrustedCustomer && initialOrderStatus == OrderStatus.SearchingDriver
+                ? (order.DriverId.HasValue ? "قبول آلي وإسناد إلى مندوب متاح بعد 10 طلبات مستلمة" : "قبول آلي بعد 10 طلبات مستلمة؛ بانتظار توفر مندوب")
+                : "إنشاء الطلب بانتظار مراجعة الإدارة"
         });
 
         // Clear Cart items if any

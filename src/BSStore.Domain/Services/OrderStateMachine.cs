@@ -18,9 +18,15 @@ public static class OrderStateMachine
             OrderStatus.Cancelled,
             OrderStatus.PaymentFailed
         },
-        [OrderStatus.PaymentPendingVerification] = new HashSet<OrderStatus>
+        [OrderStatus.PendingAdminApproval] = new HashSet<OrderStatus>
         {
             OrderStatus.Confirmed,
+            OrderStatus.Cancelled
+        },
+        [OrderStatus.PaymentPendingVerification] = new HashSet<OrderStatus>
+        {
+            OrderStatus.PendingAdminApproval,
+            OrderStatus.SearchingDriver,
             OrderStatus.PaymentFailed
         },
         [OrderStatus.Confirmed] = new HashSet<OrderStatus>

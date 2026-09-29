@@ -28,6 +28,33 @@ public class AdminController : ControllerBase
 
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue("userId")!);
 
+    [HttpPost("orders/{id:guid}/approve")]
+    public async Task<IActionResult> ApproveOrder(Guid id, CancellationToken ct)
+    {
+        var order = await _db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (order == null) return NotFound(ApiResponse.Fail("الطلب غير موجود"));
+        if (order.Status != OrderStatus.PendingAdminApproval && order.Status != OrderStatus.Confirmed)
+            return BadRequest(ApiResponse.Fail("الطلب ليس بانتظار موافقة الإدارة"));
+        var previousStatus = order.Status;
+        order.Status = OrderStatus.Confirmed;
+        order.StatusHistory.Add(new OrderStatusHistory { OldStatus = previousStatus, NewStatus = order.Status, ActorType = "Admin", ActorId = GetUserId(), Reason = "موافقة الإدارة على الطلب" });
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse.Ok("تمت الموافقة على الطلب، يرجى تعيين المندوب"));
+    }
+
+    [HttpPost("orders/{id:guid}/reject")]
+    public async Task<IActionResult> RejectOrder(Guid id, [FromBody] RejectPaymentRequest request, CancellationToken ct)
+    {
+        var order = await _db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (order == null) return NotFound(ApiResponse.Fail("الطلب غير موجود"));
+        if (order.Status != OrderStatus.PendingAdminApproval) return BadRequest(ApiResponse.Fail("الطلب ليس بانتظار موافقة الإدارة"));
+        var previousStatus = order.Status;
+        order.Status = OrderStatus.Cancelled;
+        order.StatusHistory.Add(new OrderStatusHistory { OldStatus = previousStatus, NewStatus = order.Status, ActorType = "Admin", ActorId = GetUserId(), Reason = request.Reason });
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse.Ok("تم رفض الطلب"));
+    }
+
     /// <summary>Admin dashboard summary stats.</summary>
     [HttpGet("dashboard")]
     [ProducesResponseType(typeof(ApiResponse<DashboardSummaryDto>), StatusCodes.Status200OK)]
@@ -228,7 +255,16 @@ public class AdminController : ControllerBase
         if (payment.Order != null)
         {
             payment.Order.PaymentStatus = PaymentStatus.Verified;
-            payment.Order.Status = OrderStatus.Confirmed;
+            var deliveredOrders = await _db.Orders.CountAsync(o => o.CustomerId == payment.Order.CustomerId && o.Status == OrderStatus.Delivered, ct);
+            payment.Order.Status = deliveredOrders >= 10 ? OrderStatus.SearchingDriver : OrderStatus.PendingAdminApproval;
+            payment.Order.StatusHistory.Add(new OrderStatusHistory
+            {
+                OldStatus = OrderStatus.PaymentPendingVerification,
+                NewStatus = payment.Order.Status,
+                ActorType = "Admin",
+                ActorId = GetUserId(),
+                Reason = payment.Order.Status == OrderStatus.SearchingDriver ? "عميل موثوق: قبول تلقائي بعد 10 طلبات مستلمة" : "تم اعتماد الدفع وبانتظار موافقة الإدارة"
+            });
         }
 
         await _db.SaveChangesAsync(ct);
@@ -942,7 +978,12 @@ public class AdminController : ControllerBase
                 )).ToList()
             )).ToList(),
             o.Customer?.FullName ?? "عميل المنصة",
-            o.Customer?.User?.Phone ?? ""
+            o.Customer?.User?.Phone ?? "",
+            null,
+            null,
+            o.CustomerRating,
+            o.CustomerReview,
+            o.CustomerRatedAt
         );
     }
 

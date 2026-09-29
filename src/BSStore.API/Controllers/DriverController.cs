@@ -414,7 +414,10 @@ public class DriverController : ControllerBase
             o.Customer?.FullName ?? "عميل المنصة",
             o.Customer?.User?.Phone ?? "",
             o.Address?.Latitude,
-            o.Address?.Longitude
+            o.Address?.Longitude,
+            o.CustomerRating,
+            o.CustomerReview,
+            o.CustomerRatedAt
         );
     }
 }

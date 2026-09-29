@@ -634,6 +634,15 @@ namespace BSStore.Infrastructure.Data.Migrations
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?> ("CustomerRatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?> ("CustomerRating")
+                        .HasColumnType("integer");
+
+                    b.Property<string> ("CustomerReview")
+                        .HasColumnType("text");
+
                     b.Property<decimal>("DeliveryFee")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
