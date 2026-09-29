@@ -68,7 +68,7 @@ public class AdminController : ControllerBase
             .SumAsync(o => o.TotalAmount, ct);
 
         var pendingPayments = await _db.Payments.CountAsync(p => p.Status == PaymentStatus.PendingVerification, ct);
-        var searchingDriverOrders = await _db.Orders.CountAsync(o => o.Status == OrderStatus.SearchingDriver || o.Status == OrderStatus.Confirmed, ct);
+        var searchingDriverOrders = await _db.Orders.CountAsync(o => o.Status == OrderStatus.PendingAdminApproval || o.Status == OrderStatus.SearchingDriver || o.Status == OrderStatus.Confirmed, ct);
         var activeDrivers = await _db.Drivers.CountAsync(d => d.Status == DriverStatus.Online || d.Status == DriverStatus.Busy, ct);
         var lowStock = await _db.Inventories.CountAsync(i => i.Quantity <= 5, ct);
 
@@ -128,12 +128,13 @@ public class AdminController : ControllerBase
         var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == request.DriverId, ct);
         if (driver == null) return NotFound(ApiResponse.Fail("السائق غير موجود"));
 
+        var oldStatus = order.Status;
         order.DriverId = driver.Id;
         order.Status = OrderStatus.DriverAssigned;
 
         order.StatusHistory.Add(new OrderStatusHistory
         {
-            OldStatus = order.Status,
+            OldStatus = oldStatus,
             NewStatus = OrderStatus.DriverAssigned,
             ActorType = "Admin",
             ActorId = GetUserId(),
